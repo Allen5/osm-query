@@ -11,27 +11,18 @@ import com.aliyun.odps.data.Record;
 import com.aliyun.odps.task.SQLTask;
 import com.aliyun.odps.tunnel.TableTunnel;
 import com.aliyun.odps.tunnel.io.TunnelRecordReader;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.enterprise.context.ApplicationScoped;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 @ApplicationScoped
+@Slf4j
 public class OdpsServiceImpl implements OdpsService {
-
-    private static final Logger logger = LoggerFactory.getLogger(OdpsServiceImpl.class);
-
-//    public static void main(String[] args) {
-//        long startTime = System.currentTimeMillis();
-//        List<Map<String, Object>> shanghaiResult = getOdpsData("shanghai", 125.1851, 125.4295, 43.7725, 43.9277);
-//        long endTime = System.currentTimeMillis();
-//        System.out.println(startTime - endTime);
-//    }
 
 
     //参数为城市名,经纬度信息
@@ -52,7 +43,7 @@ public class OdpsServiceImpl implements OdpsService {
 
             executeSql(odps, dropSql);
 
-            //从新创建临时表
+            //重新创建临时表
             List<String> createSql = new ArrayList<>();
             createSql.add(" create table " + cityName + "_node_tmp(osmid BIGINT, x FLOAT, y FLOAT);");
             createSql.add(" create table " + cityName + "_edge_tmp1(osmid BIGINT, osmid_start BIGINT,osmid_end BIGINT);");
@@ -71,7 +62,7 @@ public class OdpsServiceImpl implements OdpsService {
             //下载数据
             TableTunnel tunnel = new TableTunnel(odps);
 
-            //所有的表明
+            //所有的表名
             List<String> tableName = new ArrayList<>();
             tableName.add(cityName + "_node_tmp");
             tableName.add(cityName + "_edge_tmp1");
@@ -89,6 +80,7 @@ public class OdpsServiceImpl implements OdpsService {
                     Map<String, Object> map = consumeRecord(record, downloadSession.getSchema());
                     result.add(map);
                 }
+                //TODO 关闭TunnelRecordReader
                 reader.close();
             }
         } catch (Exception e) {
@@ -107,24 +99,61 @@ public class OdpsServiceImpl implements OdpsService {
         return odps;
     }
 
-    private Map<String, Object> consumeRecord(Record record, TableSchema schema) {
-        Map<String, Object> result = new HashMap<>();
-        for (int i = 0; i < schema.getColumns().size(); i++) {
-            Column column = schema.getColumn(i);
-            result.put(column.getName(), Objects.isNull(record.get(i)) ? "" : record.get(i).toString());
-        }
-        return result;
-    }
-
     private void executeSql(Odps odps, List<String> sqlList) {
         for (String sql : sqlList) {
             try {
                 Instance dropInstance = SQLTask.run(odps, sql);
                 dropInstance.waitForSuccess();
             } catch (OdpsException e) {
-                logger.error("sql task execute filed. ");
+                log.error("sql task execute filed. ");
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    private Map<String, Object> consumeRecord(Record record, TableSchema schema) {
+        Map<String, Object> result = new HashMap<>();
+        for (int i = 0; i < schema.getColumns().size(); i++) {
+            Column column = schema.getColumn(i);
+            String colValue = null;
+            switch (column.getType()) {
+                case BIGINT: {
+                    Long v = record.getBigint(i);
+                    colValue = v == null ? null : v.toString();
+                    break;
+                }
+                case BOOLEAN: {
+                    Boolean v = record.getBoolean(i);
+                    colValue = v == null ? null : v.toString();
+                    break;
+                }
+                case DATETIME: {
+                    Date v = record.getDatetime(i);
+                    colValue = v == null ? null : v.toString();
+                    break;
+                }
+                case DOUBLE: {
+                    Double v = record.getDouble(i);
+                    colValue = v == null ? null : v.toString();
+                    break;
+                }
+                case STRING: {
+                    String v = record.getString(i);
+                    colValue = v == null ? null : v.toString();
+                    break;
+                }
+                case FLOAT: {
+                    Float v = (Float) record.get(i);
+                    colValue = v == null ? null : v.toString();
+                    break;
+                }
+                default:
+                    throw new RuntimeException("Unknown column type: "
+                            + column.getType());
+            }
+            log.info("column: " + column.getName() + ", value: " + colValue);
+            result.put(column.getName(), colValue);
+        }
+        return result;
     }
 }
